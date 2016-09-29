@@ -1,0 +1,38 @@
+detectedShots = []                                                                    
+                pos_shot=0
+                neg_shot=0              
+                finished = 0  
+                while not finished == 1:                    
+                    #if no positive edges detected for shot, take next shot
+                    if resPosEdgesTs[pos_shot].size == 0:
+                        while resPosEdgesTs[pos_shot].size == 0:
+                            if pos_shot < len(resPosEdgesTs):
+                                pos_shot += 1
+                            else:
+                                finished = 1                                
+                                break                            
+                    if resNegEdgesTs[neg_shot].size == 0:
+                        while resNegEdgesTs[neg_shot].size == 0:
+                            if neg_shot < len(resNegEdgesTs):
+                                neg_shot += 1
+                            else:
+                                finished = 1                                
+                                break  
+                            
+                    else:                           
+                        for neg_edge in range(0,len(resNegEdgesTs[neg_shot])):
+                            for pos_edge in range(0,len(resPosEdgesTs[pos_shot])):
+                                distance = resNegEdgesTs[neg_shot][neg_edge] - resPosEdgesTs[pos_shot][pos_edge]
+                                #assuming timestamps for edges are uniformly increasing from begin to end of array
+                                #first distance greater zero detected has to be minimum and optimum candidate
+                                if distance >= 0:
+                                    candidate = [resPosEdgesTs[pos_shot][pos_edge],resNegEdgesTs[neg_shot][neg_edge]]
+                                    break
+                                else:
+                                    candidate = []
+                            #if candidate was found, remove edge pairs from array
+                            if candidate:
+                                del resPosEdgesTs[pos_shot][pos_edge]
+                                del resPosEdgesTs[neg_shot][neg_edge]
+                            #if no candidate was found
+                            if not candidate:
