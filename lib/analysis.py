@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from activity_plot import rf_norm_activity2, tavg_activity
 
 def averageShotData(oW7XAPI):
     maxU = []

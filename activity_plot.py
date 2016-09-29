@@ -22,6 +22,7 @@ for filename in files:
     if os.path.splitext(filename)[1] == ".npy":   
         activityData.append(np.load(dirpath+filename).item())
 #aggregate data
+#asdasd
 Ic = []
 Umax = []
 rfpower = []

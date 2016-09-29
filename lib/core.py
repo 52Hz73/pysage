@@ -1,19 +1,25 @@
+#external imports
 import matplotlib
 import numpy as np
 import requests
 import json
-import codecs
-import sys
-import datetime
-#import urlparse
-#use urllib.parse in python3
+import os, sys, time, datetime, codecs
 import urllib.parse
-import time
-# has to be installed with pip install progressbar
-#import progressbar as pb
 import matplotlib.pyplot as plt
-import sys
-import os
+
+#internal imports
+from lib.aux import progressBar, arrayHelper
+
+"""
+Module description:
+module core contains all base functions underneath the visible GUI of the program
+
+Author:
+Fabian Wilde, IPP HGW
+
+Date:
+August 2016
+"""
 
 """ 
 Description:
@@ -30,10 +36,7 @@ August 2016
 class W7XAPI(object):
     # constructor
     def __init__(self, **kwargs):
-        if 'baseurl' in kwargs.keys():
-            self.baseurl = kwargs['baseurl']
-        else:
-            self.baseurl = 'http://archive-webapi.ipp-hgw.mpg.de/ArchiveDB/'
+        
         self.channels = []
         self.intervals = dict()
         self.timestamps = dict()
@@ -41,7 +44,13 @@ class W7XAPI(object):
         self.matchedShots = []        
         self.errPosEdges = []
         self.errNegEdges = []
-        self.timestampFile = ''
+        self.timestampFile = ''        
+        
+        if 'baseurl' in kwargs.keys():
+            self.baseurl = kwargs['baseurl']
+        else:
+            self.baseurl = 'http://archive-webapi.ipp-hgw.mpg.de/ArchiveDB/'            
+        
         # string specifying format for timestamp conversion from/to string
         # ex.: 15-07-2016 10:41:26,411
         if 'format' in kwargs.keys():
@@ -77,13 +86,7 @@ class W7XAPI(object):
         if 'toldev' in kwargs.keys():
             self.toleratedDeviance = kwargs['toldev']
         else:
-            self.toleratedDeviance = 0.1
-        if 'progressbar' in kwargs.keys():
-            if not type(kwargs['progressbar']) is bool:
-                raise ValueError(" input argument 'progressbar' expects boolean keyword string 'true' or 'false'.")
-            self.useProgressBar = kwargs['progressbar']
-        else:
-            self.useProgressBar = True
+            self.toleratedDeviance = 0.1    
     
     # send a get request to given url        
     def request(self, **kwargs):
@@ -364,31 +367,7 @@ class W7XAPI(object):
             strTimestamps.append(line)
         tsdata.update({'numeric':numTimestamps, 'string':strTimestamps, 'aux':auxData})
         self.timestamps = tsdata
-        return tsdata    
-    
-    def getUniformAreas(self, arr, stol):
-        d = np.diff(arr)
-        test = np.where(d > stol)[0]
-                        
-        if test.size > 0:              
-            foo = []
-            old = 0                                   
-            for elem in test:                  
-                foo.append(arr[old:elem + 1])                   
-                old = elem + 1
-            foo.append(arr[old:])              
-            return foo
-        else:
-            return [np.array(arr)]
-        
-    def getMiddleValue(self, arr):
-        if len(arr) > 0:
-            if len(arr) % 2 == 0:
-                return arr[(len(arr) / 2) - 1]
-            else:
-                return arr[(len(arr) - 1) / 2]
-        else:
-            return None    
+        return tsdata            
         
     # clears list with previously detected shots
     def clearShots(self):
@@ -419,13 +398,19 @@ class W7XAPI(object):
             else:
                 destination = kwargs['dest']
         else:
-            destination = os.getcwd()            
-        
-        # init progress bar
-        widgets = [pb.Percentage(), ' ', pb.Bar(marker='#'), ' ', pb.ETA()]
-        bar = pb.ProgressBar(widgets=widgets, maxval=len(self.shots) * len(channelnames)).start()
-        counter = 0         
-        
+            destination = os.getcwd() 
+            
+        if 'progressbar' in kwargs.keys():
+            if not kwargs['progress'] in [True, False]:
+                raise ValueError(" expected boolean for input argument 'progressbar'.")
+            self.progressbar = kwargs['progress']
+        else:
+            self.progressbar = True
+
+        #init progressbar
+        if self.progressbar:
+            bar = progressBar(total=len(channelnames))
+                     
         for shot in self.shots:
             shotResult = dict()                                    
                          
@@ -435,17 +420,20 @@ class W7XAPI(object):
                 if not len(shotData) == 0:
                     shotResult.update(shotData)
                 counter += 1
-                bar.update(counter)
+                if self.progressbar:
+                    #update progressbar
+                    bar.update(counter)
             if not len(shotResult) == 0:
                 # save file for shot with channel data              
                 np.save(destination + os.sep + 'shot_' + str(shot['begin']) + '_' + str(shot['end']) + '.npy', shotResult)
                 # to recover dict
                 # foo=np.load(...)
                 # then
-                # dict = foo.item() 
-                
-        bar.finish()
+                # dict = foo.item()
+        if self.progressbar:        
+            bar.finish()            
             
+    #Warning: can consume a lot of RAM!
     def getShotData(self, **kwargs):
         if not len(self.shots) > 0:
             raise ValueError("no shots available to be saved. Search for shots first.")
@@ -454,6 +442,41 @@ class W7XAPI(object):
             channelnames = kwargs['name']
         else:
             channelnames = [i['name'] for i in self.channels]
+            
+        if 'progressbar' in kwargs.keys():
+            if not kwargs['progress'] in [True, False]:
+                raise ValueError(" expected boolean for input argument 'progressbar'.")
+            self.progressbar = kwargs['progress']
+        else:
+            self.progressbar = True
+                    
+        #init progressbar
+        if self.progressbar:
+            counter=0
+            bar = progressBar(total=len(channelnames))
+                     
+        totalResult = []
+        for shot in self.shots:
+            shotResult = dict()                                    
+                         
+            for channel in channelnames:
+                # take into account the time before and after shot (prepend/append extra time)                        
+                shotData = self.getChannelData(name=[channel], start=shot['begin'] - self.timeBefore, stop=shot['end'] + self.timeAfter)                
+                if not len(shotData) == 0:
+                    shotResult.update(shotData)
+                                    
+                if self.progressbar:            
+                    #update progressbar
+                    counter += 1
+                    bar.update(counter)
+            #append dict with shotData to array
+            totalResult.append(shotResult)
+           
+        if self.progressbar:        
+            bar.finish()            
+        
+        #return array of dicts containing the data for all defined channels for the shot
+        return totalResult
     
     # search for shots in channel data
     def searchShots(self, **kwargs):
@@ -516,6 +539,13 @@ class W7XAPI(object):
         else:
             tafter = self.timeAfter
             
+        if 'progressbar' in kwargs.keys():
+            if not kwargs['progress'] in [True, False]:
+                raise ValueError(" expected boolean for input argument 'progressbar'.")
+            self.progressbar = kwargs['progress']
+        else:
+            self.progressbar = True
+            
         if searchMode == 'allinrange':
             if not (('start' in kwargs.keys()) & ('stop' in kwargs.keys())) | ('file' in kwargs.keys()):
                 raise ValueError("either a file needs to be specified with parameter 'file' or a time range with parameters 'start' and 'stop'.")
@@ -536,12 +566,13 @@ class W7XAPI(object):
             # define NumPy array for faster processing and more efficient memory usage
             rawData_values = []
             rawData_dimensions = []
-            if self.useProgressBar:
-                widgets = [pb.Percentage(), ' ', pb.Bar(marker='#'), ' ', pb.ETA()]
-                bar = pb.ProgressBar(widgets=widgets, maxval=len(self.intervals[searchin['name']])).start()
-            counter = 0         
-            print("Download search channel data...\n")   
+              
+            print("Download search channel data...\n")  
             
+            #init progressbar
+            if self.progressbar:
+                bar = progressBar(total=len(self.intervals[searchin['name']]))
+                counter = 0
             if not searchin['name'] in self.intervals.keys():          
                 print("Warning: no intervals with data available for channel '"+searchin['name']+"'. Nothing to do then.")
                 exit(0)
@@ -550,24 +581,21 @@ class W7XAPI(object):
                 rawData_values.append(np.array(res[searchin['name']]['values']))
                 rawData_dimensions.append(np.array(res[searchin['name']]['dimensions']))
                 # np.array(rawData[-1]['values']).tofile(searchin['name']+str(elem['from'])+'_'+str(elem['upto'])+"_values.bin")         
-                # np.array(rawData[-1]['dimensions']).tofile(searchin['name']+str(elem['from'])+'_'+str(elem['upto'])+"_dimensions.bin")                                    
-                counter += 1   
-                #if counter > 10:
-                #    break
-                if self.useProgressBar:
+                # np.array(rawData[-1]['dimensions']).tofile(searchin['name']+str(elem['from'])+'_'+str(elem['upto'])+"_dimensions.bin")
+                if self.progressbar:
+                    counter += 1                                                    
                     bar.update(counter)
-                else:
-                    total = len(self.intervals[searchin['name']])
-                    progress = round((float(counter)/float(total))*100,2)
-                    print('Progress:'+str(progress)+" % ",end='\r')
-            if self.useProgressBar:
-                bar.finish()                        
-                
+            
+            if self.progressbar:        
+                bar.finish()
+            
             # identify edge pairs in signal
-            print("Detecting edges...")
-            if self.useProgressBar:
-                bar = pb.ProgressBar(widgets=widgets, maxval=len(rawData_values)).start()
-            counter = 0                                     
+            print("Detecting edges...")   
+            
+            #init progressbar
+            if self.progressbar:
+                bar = progressBar(total=len(rawData_values))
+                counter = 0                                 
             
             resPosEdgesTs = np.array([], dtype=np.int64)
             resNegEdgesTs = np.array([], dtype=np.int64)             
@@ -586,9 +614,9 @@ class W7XAPI(object):
                     
                 if posEdges.size:            
                     # analyze which data points belong to same edge
-                    foo = self.getUniformAreas(posEdges, stol)                  
+                    foo = arrayHelper.getUniformAreas(posEdges, stol)                  
                     # take value with middle position
-                    foo2 = np.array([self.getMiddleValue(i) for i in foo])                        
+                    foo2 = np.array([arrayHelper.getMiddleValue(i) for i in foo])                        
                     # obtain time stamps for edges
                     posEdgesTs = np.array(rawData_dimensions[j][foo2], dtype=np.int64)                        
                     # save result in array
@@ -596,29 +624,27 @@ class W7XAPI(object):
        
                 if negEdges.size:                                
                     # analyze which data points belong to same edge
-                    foo = self.getUniformAreas(negEdges, stol)                 
+                    foo = arrayHelper.getUniformAreas(negEdges, stol)                 
                     # take value with middle position
-                    foo2 = np.array([self.getMiddleValue(i) for i in foo])                        
+                    foo2 = np.array([arrayHelper.getMiddleValue(i) for i in foo])                        
                     # obtain time stamps for edges
                     negEdgesTs = np.array(rawData_dimensions[j][foo2], dtype=np.int64)           
                     # save result in array                
-                    resNegEdgesTs = np.concatenate([resNegEdgesTs, negEdgesTs])                                     
-                                                                    
-                counter += 1
-                if self.useProgressBar:
-                    bar.update(counter)
-                else:
-                    total = len(rawData_values)
-                    progress = round((float(counter)/float(total))*100,2)
-                    print('Progress:'+str(progress)+" % ",end='\r')
-                
-            if self.useProgressBar:    
-                bar.finish()
+                    resNegEdgesTs = np.concatenate([resNegEdgesTs, negEdgesTs]) 
+                    
+                if self.progressbar:
+                    counter += 1                                                    
+                    bar.update(counter)  
             
-            print("Assembling shots...")
-            if self.useProgressBar:
-                bar = pb.ProgressBar(widgets=widgets, maxval=len(resPosEdgesTs)).start()
-            counter = 0           
+            if self.progressbar:
+                bar.finish()                                                                                                              
+            
+            print("Assembling shots...")               
+            
+            #init progressbar
+            if self.progressbar:
+                bar = progressBar(total=len(resPosEdgesTs))
+                counter = 0               
                         
             for pos_edge in resPosEdgesTs:                    
                 #calculate distances between actual positive edge and all detected negative edges
@@ -651,8 +677,7 @@ class W7XAPI(object):
                     print("Warning: No possible candidate found for edge with timestamp '" + str(pos_edge) + "'")
                     self.errEdges.append({'reason':'singular','timestamp':pos_edge})
                 else:      
-                    
-                  
+                                    
                     candidate = candidate[0]                                                    
                     
                     #test if there is another positive edge between the actual positive edge and the assigned negative edge
@@ -674,16 +699,14 @@ class W7XAPI(object):
                             #remove negative edge from list
                             resNegEdgesTs=np.delete(resNegEdgesTs,candidate_index)                                                        
                             # save result for detected shot                                                  
-                            self.shots.append({'begin':pos_edge, 'end':candidate, 'duration':cand_distances[0]})                                                                                                                                                                        
-                counter += 1
-                if self.useProgressBar:
-                    bar.update(counter)
-                else:
-                    total = len(resPosEdgesTs)
-                    progress = round((float(counter)/float(total))*100,2)
-                    print('Progress:'+str(progress)+" % ",end='\r')                                    
-            if self.useProgressBar:                    
-                bar.finish()                                                      
+                            self.shots.append({'begin':pos_edge, 'end':candidate, 'duration':cand_distances[0]})
+                            
+                if self.progressbar:
+                    counter += 1                                                    
+                    bar.update(counter)  
+            
+            if self.progressbar:
+                bar.finish()                                                                                                                                                                                                                                 
                    
             #create histogram
             shotDurations = [shot['duration'] for shot in self.shots]
@@ -730,10 +753,11 @@ class W7XAPI(object):
                 print("Matching detected shots with timestamps...")
                 invalidTs = []
                 matchedShots = []             
-                if self.useProgressBar:
-                    widgets = [pb.Percentage(), ' ', pb.Bar(marker='#'), ' ', pb.ETA()]
-                    bar = pb.ProgressBar(widgets=widgets, maxval=len(self.shots)).start()
-                counter = 0
+                #init progressbar
+                if self.progressbar:
+                    bar = progressBar(total=len(resPosEdgesTs))
+                    counter = 0
+                    
                 # then assign each shot to a timestamp in the file
                 for ts in self.timestamps['numeric']:
                     #determine all shots which begin on or after timestamp
@@ -755,16 +779,12 @@ class W7XAPI(object):
                         self.matchedShots.append(foo)
                     else:
                         invalidTs.append(ts)
-                        
-                    counter += 1            
-                    if self.useProgressBar:
-                        bar.update(counter)
-                    else:
-                        total = len(self.shots)
-                        progress = round((float(counter)/float(total))*100,2)
-                        print('Progress:'+str(progress)+" % ",end='\r')                                    
+                                   
+                    if self.progressbar:
+                        counter += 1                                                    
+                        bar.update(counter)                                     
                     
-                if self.useProgressBar:
+                if self.progressBar:
                     bar.finish()
                     
                 print(str(len(self.matchedShots))+' shots matched.')
